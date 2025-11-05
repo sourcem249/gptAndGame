@@ -38,7 +38,6 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         } ?: PlayerSnapshot.default()
 
         val gameView = binding.gameView
-        gameView.setGameCallbacks(this)
         gameLoop = GameLoopController(gameView, snapshot, this)
 
         binding.pauseButton.setOnClickListener { togglePause() }
