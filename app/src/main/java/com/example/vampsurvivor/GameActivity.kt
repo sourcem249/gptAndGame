@@ -1,7 +1,10 @@
 package com.example.vampsurvivor
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -9,6 +12,7 @@ import android.os.Vibrator
 import android.view.View
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.vampsurvivor.databinding.ActivityGameBinding
 import com.example.vampsurvivor.entities.PlayerSnapshot
@@ -38,7 +42,6 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         } ?: PlayerSnapshot.default()
 
         val gameView = binding.gameView
-        gameView.setGameCallbacks(this)
         gameLoop = GameLoopController(gameView, snapshot, this)
 
         binding.pauseButton.setOnClickListener { togglePause() }
@@ -94,7 +97,20 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
     }
 
     override fun onVibrate(duration: Long) {
-        vibrator?.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+        val hasPermission = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.VIBRATE
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasPermission) {
+            return
+        }
+        val deviceVibrator = vibrator ?: return
+        if (!deviceVibrator.hasVibrator()) {
+            return
+        }
+        deviceVibrator.vibrate(
+            VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE)
+        )
     }
 
     override fun onUpgradeChoices(options: List<String>, onSelected: (String) -> Unit) {
@@ -136,8 +152,12 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         private const val EXTRA_SNAPSHOT = "snapshot"
 
         fun launch(context: Context, snapshot: PlayerSnapshot) {
-            val intent = Intent(context, GameActivity::class.java)
-            intent.putExtra(EXTRA_SNAPSHOT, snapshot)
+            val intent = Intent(context, GameActivity::class.java).apply {
+                putExtra(EXTRA_SNAPSHOT, snapshot)
+                if (context !is Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
             context.startActivity(intent)
         }
     }
