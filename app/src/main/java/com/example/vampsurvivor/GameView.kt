@@ -10,12 +10,14 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.content.res.ResourcesCompat
 import com.example.vampsurvivor.entities.Enemy
+import com.example.vampsurvivor.entities.Obstacle
 import com.example.vampsurvivor.entities.PickupItem
 import com.example.vampsurvivor.entities.Player
 import com.example.vampsurvivor.entities.PlayerSnapshot
 import com.example.vampsurvivor.entities.Projectile
 import com.example.vampsurvivor.systems.GameLoopController
 import com.example.vampsurvivor.systems.VirtualJoystick
+import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -34,6 +36,13 @@ class GameView @JvmOverloads constructor(
     private val bossPaint = Paint().apply { color = Color.MAGENTA }
     private val projectilePaint = Paint().apply { color = Color.YELLOW }
     private val xpPaint = Paint().apply { color = Color.GREEN }
+    private val obstaclePaint = Paint().apply {
+        color = Color.argb(255, 45, 45, 45)
+    }
+    private val gridPaint = Paint().apply {
+        color = Color.argb(120, 70, 70, 70)
+        strokeWidth = 2f
+    }
     private val joystick = VirtualJoystick(
         Paint().apply {
             color = ResourcesCompat.getColor(resources, R.color.joystick_base, null)
@@ -64,9 +73,14 @@ class GameView @JvmOverloads constructor(
     private val enemies = mutableListOf<Enemy>()
     private val projectiles = mutableListOf<Projectile>()
     private val pickups = mutableListOf<PickupItem>()
+    private val obstacles = mutableListOf<Obstacle>()
 
     private var arenaWidth = 0
     private var arenaHeight = 0
+    private val worldWidth = 6000f
+    private val worldHeight = 6000f
+    private var cameraX = 0f
+    private var cameraY = 0f
 
     private var spawnTimer = 0f
     private var waveTimer = 0f
@@ -87,8 +101,8 @@ class GameView @JvmOverloads constructor(
         this.controller = controller
         resetState(snapshot)
         val radius = 48f
-        val centerX = if (arenaWidth > 0) arenaWidth / 2f else width / 2f
-        val centerY = if (arenaHeight > 0) arenaHeight / 2f else height / 2f
+        val centerX = worldWidth / 2f
+        val centerY = worldHeight / 2f
         player = Player(
             x = centerX,
             y = centerY,
@@ -102,6 +116,7 @@ class GameView @JvmOverloads constructor(
             experience = snapshot.experience,
             nextLevel = snapshot.nextLevel
         )
+        updateCamera()
     }
 
     fun startLoop(): Boolean {
@@ -217,13 +232,18 @@ class GameView @JvmOverloads constructor(
         val magnitude = hypot(joystickX.toDouble(), joystickY.toDouble()).toFloat()
         if (magnitude > 0f) {
             val speed = player.moveSpeed * delta
-            val maxX = (arenaWidth.takeIf { it > 0 } ?: width) - player.radius
-            val maxY = (arenaHeight.takeIf { it > 0 } ?: height) - player.radius
-            val minX = player.radius
-            val minY = player.radius
-            player.x = (player.x + joystickX * speed).coerceIn(minX, maxX)
-            player.y = (player.y + joystickY * speed).coerceIn(minY, maxY)
+            val nextX = (player.x + joystickX * speed).coerceIn(player.radius, worldWidth - player.radius)
+            val nextY = (player.y + joystickY * speed).coerceIn(player.radius, worldHeight - player.radius)
+            val resolved = resolveObstacleCollision(nextX, nextY, player.radius)
+            player.x = resolved.first.coerceIn(player.radius, worldWidth - player.radius)
+            player.y = resolved.second.coerceIn(player.radius, worldHeight - player.radius)
+        } else {
+            val resolved = resolveObstacleCollision(player.x, player.y, player.radius)
+            player.x = resolved.first.coerceIn(player.radius, worldWidth - player.radius)
+            player.y = resolved.second.coerceIn(player.radius, worldHeight - player.radius)
         }
+
+        updateCamera()
 
         spawnTimer -= delta
         waveTimer += delta
@@ -248,8 +268,13 @@ class GameView @JvmOverloads constructor(
         while (iterator.hasNext()) {
             val enemy = iterator.next()
             val angle = atan2(player.y - enemy.y, player.x - enemy.x)
-            enemy.x += cos(angle) * enemy.moveSpeed * delta
-            enemy.y += sin(angle) * enemy.moveSpeed * delta
+            val nextX = (enemy.x + cos(angle) * enemy.moveSpeed * delta)
+                .coerceIn(enemy.radius, worldWidth - enemy.radius)
+            val nextY = (enemy.y + sin(angle) * enemy.moveSpeed * delta)
+                .coerceIn(enemy.radius, worldHeight - enemy.radius)
+            val resolved = resolveObstacleCollision(nextX, nextY, enemy.radius)
+            enemy.x = resolved.first.coerceIn(enemy.radius, worldWidth - enemy.radius)
+            enemy.y = resolved.second.coerceIn(enemy.radius, worldHeight - enemy.radius)
             if (hypot((player.x - enemy.x).toDouble(), (player.y - enemy.y).toDouble()) <= player.radius + enemy.radius) {
                 player.damage(enemy.damage * delta)
                 callbacks?.onVibrate(30)
@@ -295,6 +320,7 @@ class GameView @JvmOverloads constructor(
         val pickupIterator = pickups.iterator()
         while (pickupIterator.hasNext()) {
             val pickup = pickupIterator.next()
+            applyPickupMagnetism(pickup, player, delta)
             if (hypot((player.x - pickup.x).toDouble(), (player.y - pickup.y).toDouble()) <= player.radius + pickup.radius) {
                 when (pickup.type) {
                     PickupItem.Type.XP_GEM -> player.gainXp(pickup.xp) { level -> onLevelUp(level) }
@@ -355,6 +381,32 @@ class GameView @JvmOverloads constructor(
         }
     }
 
+    private fun applyPickupMagnetism(pickup: PickupItem, player: Player, delta: Float) {
+        if (pickup.type != PickupItem.Type.XP_GEM) {
+            pickup.vx *= 0.75f
+            pickup.vy *= 0.75f
+        } else {
+            val dx = player.x - pickup.x
+            val dy = player.y - pickup.y
+            val distance = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            val magnetRadius = 280f
+            if (distance <= magnetRadius && distance > 0f) {
+                val pull = 240f + 320f * (1f - (distance / magnetRadius).coerceIn(0f, 1f))
+                val norm = 1f / distance
+                pickup.vx = dx * norm * pull
+                pickup.vy = dy * norm * pull
+            } else if (distance == 0f) {
+                pickup.vx = 0f
+                pickup.vy = 0f
+            } else {
+                pickup.vx *= 0.85f
+                pickup.vy *= 0.85f
+            }
+        }
+        pickup.x = (pickup.x + pickup.vx * delta).coerceIn(0f, worldWidth)
+        pickup.y = (pickup.y + pickup.vy * delta).coerceIn(0f, worldHeight)
+    }
+
     private fun onLevelUp(level: Int) {
         if (awaitingUpgrade) return
         awaitingUpgrade = true
@@ -371,19 +423,31 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun spawnEnemies() {
+        val player = player ?: return
         val count = 1 + wave / 2
         repeat(count) {
-            val angle = Random.nextFloat() * 360f
-            val distance = max(width, height) * 0.6f
-            val spawnX = width / 2f + cos(Math.toRadians(angle.toDouble())).toFloat() * distance
-            val spawnY = height / 2f + sin(Math.toRadians(angle.toDouble())).toFloat() * distance
+            var attempts = 0
+            var spawnX: Float
+            var spawnY: Float
+            val radius = 32f
+            do {
+                val angle = Random.nextDouble(0.0, PI * 2)
+                val distance = Random.nextDouble(550.0, 1000.0)
+                val offsetX = (cos(angle) * distance).toFloat()
+                val offsetY = (sin(angle) * distance).toFloat()
+                spawnX = (player.x + offsetX).coerceIn(radius, worldWidth - radius)
+                spawnY = (player.y + offsetY).coerceIn(radius, worldHeight - radius)
+                attempts++
+            } while ((hypot((player.x - spawnX).toDouble(), (player.y - spawnY).toDouble()) < 280 ||
+                    collidesWithObstacle(spawnX, spawnY, radius)) && attempts < 8)
+
             enemies.add(
                 Enemy(
                     x = spawnX,
                     y = spawnY,
-                    radius = 32f,
+                    radius = radius,
                     hp = 30f + wave * 6f,
-                    moveSpeed = 100f + wave * 5f,
+                    moveSpeed = 70f + wave * 3.5f,
                     damage = 6f + wave
                 )
             )
@@ -391,13 +455,29 @@ class GameView @JvmOverloads constructor(
     }
 
     private fun spawnBoss() {
+        val player = player ?: return
+        var attempts = 0
+        val radius = 64f
+        var spawnX: Float
+        var spawnY: Float
+        do {
+            val angle = Random.nextDouble(0.0, PI * 2)
+            val distance = Random.nextDouble(900.0, 1600.0)
+            val offsetX = (cos(angle) * distance).toFloat()
+            val offsetY = (sin(angle) * distance).toFloat()
+            spawnX = (player.x + offsetX).coerceIn(radius, worldWidth - radius)
+            spawnY = (player.y + offsetY).coerceIn(radius, worldHeight - radius)
+            attempts++
+        } while ((hypot((player.x - spawnX).toDouble(), (player.y - spawnY).toDouble()) < 600 ||
+                collidesWithObstacle(spawnX, spawnY, radius)) && attempts < 12)
+
         enemies.add(
             Enemy(
-                x = Random.nextInt(width).toFloat(),
-                y = 0f,
-                radius = 64f,
+                x = spawnX,
+                y = spawnY,
+                radius = radius,
                 hp = 400f + wave * 40,
-                moveSpeed = 80f,
+                moveSpeed = 60f,
                 damage = 20f,
                 isBoss = true
             )
@@ -407,19 +487,37 @@ class GameView @JvmOverloads constructor(
     private fun draw() {
         val canvas = holder.lockCanvas() ?: return
         try {
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+            val widthF = width.toFloat()
+            val heightF = height.toFloat()
+            canvas.drawRect(0f, 0f, widthF, heightF, bgPaint)
+            drawGrid(canvas, widthF, heightF)
+            obstacles.forEach { obstacle ->
+                if (obstacle.x + obstacle.radius < cameraX ||
+                    obstacle.x - obstacle.radius > cameraX + widthF ||
+                    obstacle.y + obstacle.radius < cameraY ||
+                    obstacle.y - obstacle.radius > cameraY + heightF
+                ) {
+                    return@forEach
+                }
+                canvas.drawCircle(
+                    obstacle.x - cameraX,
+                    obstacle.y - cameraY,
+                    obstacle.radius,
+                    obstaclePaint
+                )
+            }
             player?.let { player ->
-                canvas.drawCircle(player.x, player.y, player.radius, playerPaint)
+                canvas.drawCircle(player.x - cameraX, player.y - cameraY, player.radius, playerPaint)
             }
             enemies.forEach { enemy ->
                 val paint = if (enemy.isBoss) bossPaint else enemyPaint
-                canvas.drawCircle(enemy.x, enemy.y, enemy.radius, paint)
+                canvas.drawCircle(enemy.x - cameraX, enemy.y - cameraY, enemy.radius, paint)
             }
             projectiles.forEach { projectile ->
-                canvas.drawCircle(projectile.x, projectile.y, projectile.radius, projectilePaint)
+                canvas.drawCircle(projectile.x - cameraX, projectile.y - cameraY, projectile.radius, projectilePaint)
             }
             pickups.forEach { pickup ->
-                canvas.drawCircle(pickup.x, pickup.y, pickup.radius, xpPaint)
+                canvas.drawCircle(pickup.x - cameraX, pickup.y - cameraY, pickup.radius, xpPaint)
             }
             joystick.draw(canvas)
         } finally {
@@ -435,6 +533,7 @@ class GameView @JvmOverloads constructor(
     override fun surfaceCreated(holder: SurfaceHolder) {
         arenaWidth = width
         arenaHeight = height
+        updateCamera()
         if (startRequested && thread?.isAlive != true) {
             startLoop()
         }
@@ -445,12 +544,8 @@ class GameView @JvmOverloads constructor(
         arenaHeight = height
         if (player == null) {
             initialize(lastSnapshot, callbacks ?: return, controller ?: return)
-        } else {
-            player?.let {
-                it.x = width / 2f
-                it.y = height / 2f
-            }
         }
+        updateCamera()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -468,6 +563,88 @@ class GameView @JvmOverloads constructor(
         enemies.clear()
         projectiles.clear()
         pickups.clear()
+        obstacles.clear()
+        generateObstacles()
         joystick.reset()
+        updateCamera()
+    }
+
+    private fun drawGrid(canvas: Canvas, widthF: Float, heightF: Float) {
+        val spacing = 256f
+        val offsetX = ((-cameraX) % spacing + spacing) % spacing
+        var x = offsetX - spacing
+        while (x < widthF + spacing) {
+            canvas.drawLine(x, 0f, x, heightF, gridPaint)
+            x += spacing
+        }
+        val offsetY = ((-cameraY) % spacing + spacing) % spacing
+        var y = offsetY - spacing
+        while (y < heightF + spacing) {
+            canvas.drawLine(0f, y, widthF, y, gridPaint)
+            y += spacing
+        }
+    }
+
+    private fun generateObstacles() {
+        val target = 45
+        val margin = 200f
+        val safeRadius = 420f
+        val centerX = worldWidth / 2f
+        val centerY = worldHeight / 2f
+        var attempts = 0
+        while (obstacles.size < target && attempts < target * 25) {
+            attempts++
+            val radius = Random.nextFloat() * 90f + 60f
+            val x = Random.nextFloat() * (worldWidth - margin * 2f) + margin
+            val y = Random.nextFloat() * (worldHeight - margin * 2f) + margin
+            if (hypot((x - centerX).toDouble(), (y - centerY).toDouble()) < safeRadius + radius) continue
+            if (x - radius < 0f || x + radius > worldWidth || y - radius < 0f || y + radius > worldHeight) continue
+            if (obstacles.any { existing ->
+                    hypot((existing.x - x).toDouble(), (existing.y - y).toDouble()) < existing.radius + radius + 80f
+                }
+            ) continue
+            obstacles.add(Obstacle(x, y, radius))
+        }
+    }
+
+    private fun resolveObstacleCollision(targetX: Float, targetY: Float, radius: Float): Pair<Float, Float> {
+        var resolvedX = targetX
+        var resolvedY = targetY
+        obstacles.forEach { obstacle ->
+            val dx = resolvedX - obstacle.x
+            val dy = resolvedY - obstacle.y
+            val distance = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            val minDistance = radius + obstacle.radius
+            if (distance < minDistance && distance > 0.0001f) {
+                val overlap = minDistance - distance
+                val norm = 1f / distance
+                resolvedX += dx * norm * overlap
+                resolvedY += dy * norm * overlap
+            } else if (distance == 0f) {
+                resolvedX += minDistance
+            }
+        }
+        return resolvedX to resolvedY
+    }
+
+    private fun collidesWithObstacle(x: Float, y: Float, radius: Float): Boolean {
+        return obstacles.any { obstacle ->
+            hypot((obstacle.x - x).toDouble(), (obstacle.y - y).toDouble()) < obstacle.radius + radius
+        }
+    }
+
+    private fun updateCamera() {
+        val widthF = arenaWidth.takeIf { it > 0 }?.toFloat() ?: width.toFloat()
+        val heightF = arenaHeight.takeIf { it > 0 }?.toFloat() ?: height.toFloat()
+        val player = player
+        val maxX = (worldWidth - widthF).coerceAtLeast(0f)
+        val maxY = (worldHeight - heightF).coerceAtLeast(0f)
+        if (player != null) {
+            cameraX = (player.x - widthF / 2f).coerceIn(0f, maxX)
+            cameraY = (player.y - heightF / 2f).coerceIn(0f, maxY)
+        } else {
+            cameraX = maxX / 2f
+            cameraY = maxY / 2f
+        }
     }
 }
