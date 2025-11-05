@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">Vamp Survivor</string>
+    <string name="start_game">Start Game</string>
+    <string name="load_game">Load Progress</string>
+    <string name="resume_game">Resume Game</string>
+    <string name="select_character">Select Your Hunter</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="quit">Quit</string>
+    <string name="game_over">Game Over</string>
+    <string name="return_menu">Return to Menu</string>
+    <string name="no_save_found">No saved progress found.</string>
+    <string name="character_speedster">Speedster</string>
+    <string name="character_tank">Tank</string>
+    <string name="character_mage">Mage</string>
+    <string name="upgrade_title">Choose an upgrade</string>
+    <string name="upgrade_damage">Increase damage</string>
+    <string name="upgrade_attack_speed">Increase attack speed</string>
+    <string name="upgrade_move_speed">Increase move speed</string>
+    <string name="upgrade_cooldown">Reduce cooldowns</string>
+</resources>
