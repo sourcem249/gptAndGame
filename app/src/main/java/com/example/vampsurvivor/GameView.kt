@@ -48,6 +48,7 @@ class GameView @JvmOverloads constructor(
 
     private var callbacks: GameLoopController.Callbacks? = null
     private var controller: GameLoopController? = null
+    @Volatile
     private var thread: Thread? = null
 
     @Volatile
@@ -84,8 +85,7 @@ class GameView @JvmOverloads constructor(
     fun initialize(snapshot: PlayerSnapshot, callbacks: GameLoopController.Callbacks, controller: GameLoopController) {
         this.callbacks = callbacks
         this.controller = controller
-        this.wave = snapshot.wave
-        this.lastSnapshot = snapshot
+        resetState(snapshot)
         val radius = 48f
         val centerX = if (arenaWidth > 0) arenaWidth / 2f else width / 2f
         val centerY = if (arenaHeight > 0) arenaHeight / 2f else height / 2f
@@ -104,33 +104,47 @@ class GameView @JvmOverloads constructor(
         )
     }
 
-    fun startLoop() {
+    fun startLoop(): Boolean {
         startRequested = true
         if (thread?.isAlive == true) {
-            resumeLoop()
-            return
+            return resumeLoop()
         }
         if (!holder.surface.isValid) {
-            return
+            return false
         }
         running = true
         paused = false
-        thread = Thread(this)
-        thread?.start()
+        thread = Thread(this).also { it.start() }
+        return true
     }
 
     fun pauseLoop() {
+        if (!running) return
         paused = true
     }
 
-    fun resumeLoop() {
+    fun resumeLoop(): Boolean {
+        if (!running || awaitingUpgrade) {
+            return false
+        }
         paused = false
+        return true
     }
 
     fun stopLoop() {
         running = false
         startRequested = false
-        thread?.join(120)
+        thread?.let { loopThread ->
+            try {
+                loopThread.join(500)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                if (loopThread.isAlive) {
+                    loopThread.interrupt()
+                }
+            }
+        }
         thread = null
     }
 
@@ -441,5 +455,19 @@ class GameView @JvmOverloads constructor(
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         stopLoop()
+    }
+
+    private fun resetState(snapshot: PlayerSnapshot) {
+        wave = snapshot.wave
+        lastSnapshot = snapshot
+        spawnTimer = 0f
+        waveTimer = 0f
+        bossSpawned = false
+        saveTimer = 0f
+        awaitingUpgrade = false
+        enemies.clear()
+        projectiles.clear()
+        pickups.clear()
+        joystick.reset()
     }
 }

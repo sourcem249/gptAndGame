@@ -24,8 +24,9 @@ class GameLoopController(
     }
 
     fun start() {
-        gameView.startLoop()
-        callbacks.onGamePaused(false)
+        if (gameView.startLoop()) {
+            callbacks.onGamePaused(false)
+        }
     }
 
     fun pause() {
@@ -34,8 +35,9 @@ class GameLoopController(
     }
 
     fun resume() {
-        gameView.resumeLoop()
-        callbacks.onGamePaused(false)
+        if (gameView.resumeLoop()) {
+            callbacks.onGamePaused(false)
+        }
     }
 
     fun isPaused(): Boolean = gameView.isPaused()
