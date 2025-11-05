@@ -17,5 +17,8 @@
     <string name="upgrade_damage">Increase damage</string>
     <string name="upgrade_attack_speed">Increase attack speed</string>
     <string name="upgrade_move_speed">Increase move speed</string>
-    <string name="upgrade_cooldown">Reduce cooldowns</string>
+    <string name="upgrade_multi_shot">Split shot: fire an extra projectile</string>
+    <string name="upgrade_shockwave">Pulse wave: emit a weak area blast</string>
+    <string name="upgrade_regeneration">Regeneration: slowly recover health</string>
+    <string name="pause_upgrades_title">Chosen upgrades</string>
 </resources>

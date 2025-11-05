@@ -15,6 +15,7 @@ class GameLoopController(
         fun onGameOver()
         fun onVibrate(duration: Long)
         fun onUpgradeChoices(options: List<String>, onSelected: (String) -> Unit)
+        fun onUpgradeSummaryChanged(upgrades: List<String>)
         fun onSaveRequested(snapshot: PlayerSnapshot)
         fun onPlayHit()
     }
@@ -24,8 +25,9 @@ class GameLoopController(
     }
 
     fun start() {
-        gameView.startLoop()
-        callbacks.onGamePaused(false)
+        if (gameView.startLoop()) {
+            callbacks.onGamePaused(false)
+        }
     }
 
     fun pause() {
@@ -34,8 +36,9 @@ class GameLoopController(
     }
 
     fun resume() {
-        gameView.resumeLoop()
-        callbacks.onGamePaused(false)
+        if (gameView.resumeLoop()) {
+            callbacks.onGamePaused(false)
+        }
     }
 
     fun isPaused(): Boolean = gameView.isPaused()

@@ -28,6 +28,7 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
     private val store by lazy { GameStateStore(this) }
     private val audio by lazy { AudioController(this) }
     private val vibrator by lazy { getSystemService(Vibrator::class.java) }
+    private var latestUpgradeSummary: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +86,7 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         runOnUiThread {
             binding.pauseMenu.visibility = if (paused) android.view.View.VISIBLE else android.view.View.GONE
             binding.pauseButton.text = if (paused) getString(R.string.resume) else getString(R.string.pause)
+            updateUpgradeSummaryUi()
         }
     }
 
@@ -129,6 +131,11 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         }
     }
 
+    override fun onUpgradeSummaryChanged(upgrades: List<String>) {
+        latestUpgradeSummary = upgrades
+        runOnUiThread { updateUpgradeSummaryUi() }
+    }
+
     override fun onPlayHit() {
         audio.playHit()
     }
@@ -145,6 +152,18 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
             gameLoop.pause()
         } else {
             gameLoop.resume()
+        }
+    }
+
+    private fun updateUpgradeSummaryUi() {
+        val hasUpgrades = latestUpgradeSummary.isNotEmpty()
+        binding.pauseUpgradesTitle.visibility = if (hasUpgrades) View.VISIBLE else View.GONE
+        binding.pauseUpgradeScroll.visibility = if (hasUpgrades) View.VISIBLE else View.GONE
+        binding.pauseUpgradeList.visibility = if (hasUpgrades) View.VISIBLE else View.GONE
+        binding.pauseUpgradeList.text = if (hasUpgrades) {
+            latestUpgradeSummary.joinToString(separator = "\n")
+        } else {
+            ""
         }
     }
 
