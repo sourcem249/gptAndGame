@@ -74,8 +74,6 @@ class VirtualJoystick(
 
     fun reset() {
         pointerId = -1
-        knobX = baseX
-        knobY = baseY
         normalizedX = 0f
         normalizedY = 0f
     }

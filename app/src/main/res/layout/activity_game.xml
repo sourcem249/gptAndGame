@@ -49,35 +49,6 @@
             android:layout_height="wrap_content"
             android:text="@string/quit"
             android:layout_marginTop="16dp" />
-
-        <TextView
-            android:id="@+id/pauseUpgradesTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/pause_upgrades_title"
-            android:textColor="@color/white"
-            android:textSize="18sp"
-            android:visibility="gone" />
-
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_marginTop="8dp"
-            android:layout_weight="1"
-            android:fillViewport="true"
-            android:visibility="gone"
-            android:id="@+id/pauseUpgradeScroll">
-
-            <TextView
-                android:id="@+id/pauseUpgradeList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="@color/white"
-                android:textSize="16sp"
-                android:padding="8dp"
-                android:visibility="gone" />
-        </ScrollView>
     </LinearLayout>
 
     <LinearLayout

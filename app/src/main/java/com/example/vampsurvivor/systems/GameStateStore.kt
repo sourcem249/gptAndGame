@@ -24,11 +24,6 @@ class GameStateStore(context: Context) {
             putFloat(KEY_MOVE_SPEED, snapshot.moveSpeed)
             putInt(KEY_WAVE, snapshot.wave)
             putBoolean(KEY_RUNNING, snapshot.isRunning)
-            if (snapshot.skillChoices.isEmpty()) {
-                remove(KEY_SKILLS)
-            } else {
-                putString(KEY_SKILLS, snapshot.skillChoices.joinToString(separator = "|"))
-            }
         }
     }
 
@@ -45,7 +40,6 @@ class GameStateStore(context: Context) {
             damage = prefs.getFloat(KEY_DAMAGE, archetype.damage),
             attackCooldown = prefs.getFloat(KEY_COOLDOWN, archetype.attackCooldown),
             moveSpeed = prefs.getFloat(KEY_MOVE_SPEED, archetype.moveSpeed),
-            skillChoices = prefs.getString(KEY_SKILLS, null)?.takeIf { it.isNotEmpty() }?.split("|") ?: emptyList(),
             wave = prefs.getInt(KEY_WAVE, 1),
             isRunning = prefs.getBoolean(KEY_RUNNING, false)
         )
@@ -63,6 +57,5 @@ class GameStateStore(context: Context) {
         private const val KEY_MOVE_SPEED = "moveSpeed"
         private const val KEY_WAVE = "wave"
         private const val KEY_RUNNING = "running"
-        private const val KEY_SKILLS = "skills"
     }
 }
