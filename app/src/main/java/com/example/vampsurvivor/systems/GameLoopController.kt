@@ -1,7 +1,9 @@
 package com.example.vampsurvivor.systems
 
 import com.example.vampsurvivor.GameView
+import com.example.vampsurvivor.entities.PlayerSkill
 import com.example.vampsurvivor.entities.PlayerSnapshot
+import com.example.vampsurvivor.entities.UpgradeChoice
 
 class GameLoopController(
     private val gameView: GameView,
@@ -10,11 +12,11 @@ class GameLoopController(
 ) {
 
     interface Callbacks {
-        fun onHudChanged(text: String)
+        fun onHudChanged(text: String, xpPercent: Float, xpText: String)
         fun onGamePaused(paused: Boolean)
         fun onGameOver()
         fun onVibrate(duration: Long)
-        fun onUpgradeChoices(options: List<String>, onSelected: (String) -> Unit)
+        fun onUpgradeChoices(options: List<UpgradeChoice>, onSelected: (PlayerSkill) -> Unit)
         fun onSaveRequested(snapshot: PlayerSnapshot)
         fun onPlayHit()
     }
@@ -44,9 +46,11 @@ class GameLoopController(
 
     fun snapshot(): PlayerSnapshot = gameView.snapshot()
 
-    fun applyUpgrade(choice: String) {
-        gameView.applyUpgrade(choice)
+    fun applyUpgrade(skill: PlayerSkill) {
+        gameView.applyUpgrade(skill)
     }
+
+    fun skillSummaries(): List<String> = gameView.skillSummaries()
 
     fun stop() {
         gameView.stopLoop()
