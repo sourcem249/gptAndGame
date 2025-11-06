@@ -15,7 +15,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.vampsurvivor.databinding.ActivityGameBinding
+import com.example.vampsurvivor.entities.PlayerSkill
 import com.example.vampsurvivor.entities.PlayerSnapshot
+import com.example.vampsurvivor.entities.UpgradeChoice
 import com.example.vampsurvivor.systems.AudioController
 import com.example.vampsurvivor.systems.GameLoopController
 import com.example.vampsurvivor.systems.GameStateStore
@@ -83,14 +85,25 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
 
     override fun onGamePaused(paused: Boolean) {
         runOnUiThread {
-            binding.pauseMenu.visibility = if (paused) android.view.View.VISIBLE else android.view.View.GONE
+            binding.pauseMenu.visibility = if (paused) View.VISIBLE else View.GONE
             binding.pauseButton.text = if (paused) getString(R.string.resume) else getString(R.string.pause)
+            if (paused) {
+                val summaries = gameLoop.skillSummaries()
+                val header = getString(R.string.pause_skill_header)
+                val body = if (summaries.isEmpty()) {
+                    getString(R.string.pause_skill_empty)
+                } else {
+                    summaries.joinToString(separator = "\n")
+                }
+                binding.pauseSkillTitle.text = header
+                binding.pauseSkillList.text = body
+            }
         }
     }
 
     override fun onGameOver() {
         runOnUiThread {
-            binding.gameOverOverlay.visibility = android.view.View.VISIBLE
+            binding.gameOverOverlay.visibility = View.VISIBLE
             gameLoop.pause()
             binding.pauseMenu.visibility = View.GONE
         }
@@ -113,17 +126,17 @@ class GameActivity : AppCompatActivity(), GameLoopController.Callbacks {
         )
     }
 
-    override fun onUpgradeChoices(options: List<String>, onSelected: (String) -> Unit) {
+    override fun onUpgradeChoices(options: List<UpgradeChoice>, onSelected: (PlayerSkill) -> Unit) {
         runOnUiThread {
-            binding.upgradePanel.visibility = android.view.View.VISIBLE
+            binding.upgradePanel.visibility = View.VISIBLE
             val buttons = listOf(binding.upgradeOption1, binding.upgradeOption2, binding.upgradeOption3)
             buttons.forEach { it.visibility = View.GONE }
-            buttons.zip(options).forEach { (button, text) ->
+            buttons.zip(options).forEach { (button, option) ->
                 button.visibility = View.VISIBLE
-                button.text = text
+                button.text = option.displayText
                 button.setOnClickListener {
-                    binding.upgradePanel.visibility = android.view.View.GONE
-                    onSelected(text)
+                    binding.upgradePanel.visibility = View.GONE
+                    onSelected(option.skill)
                 }
             }
         }
