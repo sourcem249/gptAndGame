@@ -13,7 +13,9 @@ import com.example.vampsurvivor.entities.Enemy
 import com.example.vampsurvivor.entities.Obstacle
 import com.example.vampsurvivor.entities.PickupItem
 import com.example.vampsurvivor.entities.Player
+import com.example.vampsurvivor.entities.PlayerSkill
 import com.example.vampsurvivor.entities.PlayerSnapshot
+import com.example.vampsurvivor.entities.UpgradeChoice
 import com.example.vampsurvivor.entities.Projectile
 import com.example.vampsurvivor.systems.GameLoopController
 import com.example.vampsurvivor.systems.VirtualJoystick
@@ -21,7 +23,6 @@ import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
-import kotlin.math.max
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -30,11 +31,15 @@ class GameView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : SurfaceView(context, attrs), SurfaceHolder.Callback, Runnable {
 
+    private data class OrbitalBlade(var angle: Float)
+
     private val bgPaint = Paint().apply { color = Color.BLACK }
     private val playerPaint = Paint().apply { color = Color.CYAN }
     private val enemyPaint = Paint().apply { color = Color.RED }
     private val bossPaint = Paint().apply { color = Color.MAGENTA }
     private val projectilePaint = Paint().apply { color = Color.YELLOW }
+    private val laserPaint = Paint().apply { color = Color.CYAN }
+    private val orbitalPaint = Paint().apply { color = Color.WHITE }
     private val xpPaint = Paint().apply { color = Color.GREEN }
     private val obstaclePaint = Paint().apply {
         color = Color.argb(255, 45, 45, 45)
@@ -74,11 +79,14 @@ class GameView @JvmOverloads constructor(
     private val projectiles = mutableListOf<Projectile>()
     private val pickups = mutableListOf<PickupItem>()
     private val obstacles = mutableListOf<Obstacle>()
+    private val orbitalBlades = mutableListOf<OrbitalBlade>()
 
     private var arenaWidth = 0
     private var arenaHeight = 0
     private val worldWidth = 6000f
     private val worldHeight = 6000f
+    private var spawnX = worldWidth / 2f
+    private var spawnY = worldHeight / 2f
     private var cameraX = 0f
     private var cameraY = 0f
 
@@ -90,6 +98,10 @@ class GameView @JvmOverloads constructor(
 
     private var awaitingUpgrade = false
     private var lastSnapshot = PlayerSnapshot.default()
+    private val skillLevels = IntArray(PlayerSkill.values().size)
+    private var shockwaveTimer = 0f
+    private var laserTimer = 0f
+    private var homePulseTimer = 0f
 
     init {
         holder.addCallback(this)
@@ -103,6 +115,8 @@ class GameView @JvmOverloads constructor(
         val radius = 48f
         val centerX = worldWidth / 2f
         val centerY = worldHeight / 2f
+        spawnX = centerX
+        spawnY = centerY
         player = Player(
             x = centerX,
             y = centerY,
@@ -177,33 +191,87 @@ class GameView @JvmOverloads constructor(
             damage = player.damage,
             attackCooldown = player.attackCooldown,
             moveSpeed = player.moveSpeed,
+            skillLevels = skillLevels.toList(),
             wave = wave,
             isRunning = running && !paused
         )
         return lastSnapshot
     }
 
-    fun applyUpgrade(choice: String) {
+    fun applyUpgrade(skill: PlayerSkill) {
         val player = player ?: return
-        when {
-            choice.contains("damage", ignoreCase = true) -> {
-                player.damage *= 1.25f
+        val index = skill.ordinal
+        if (skillLevels[index] >= skill.maxLevel) {
+            awaitingUpgrade = false
+            resumeLoop()
+            return
+        }
+        skillLevels[index] += 1
+        when (skill) {
+            PlayerSkill.DAMAGE -> {
+                player.damage *= 1.18f
             }
-            choice.contains("attack", ignoreCase = true) -> {
-                player.attackCooldown *= 0.85f
+            PlayerSkill.ATTACK_SPEED -> {
+                player.attackCooldown *= 0.9f
+                player.attackTimer = player.attackTimer.coerceAtMost(player.attackCooldown)
             }
-            choice.contains("move", ignoreCase = true) -> {
-                player.moveSpeed *= 1.2f
+            PlayerSkill.MOVE_SPEED -> {
+                player.moveSpeed *= 1.12f
             }
-            choice.contains("cooldown", ignoreCase = true) -> {
-                player.attackCooldown *= 0.8f
+            PlayerSkill.DOUBLE_SHOT -> {
+                // handled during auto-attack
             }
-            choice.contains("heal", ignoreCase = true) -> {
-                player.heal(0.2f)
+            PlayerSkill.SHOCKWAVE -> {
+                shockwaveTimer = 0f
             }
+            PlayerSkill.REGENERATION -> {
+                // handled in update loop
+            }
+            PlayerSkill.LASER_BARRAGE -> {
+                laserTimer = 0f
+            }
+            PlayerSkill.BASE_PULSE -> {
+                homePulseTimer = 0f
+            }
+            PlayerSkill.PIERCING_SHOT -> {
+                // handled during projectile resolution
+            }
+            PlayerSkill.ORBITAL_BLADES -> {
+                ensureOrbitalBlades(skillLevels[index])
+            }
+        }
+        if (skill != PlayerSkill.ORBITAL_BLADES) {
+            ensureOrbitalBlades(skillLevels[PlayerSkill.ORBITAL_BLADES.ordinal])
         }
         awaitingUpgrade = false
         resumeLoop()
+    }
+
+    fun skillSummaries(): List<String> {
+        return PlayerSkill.values().mapIndexedNotNull { index, skill ->
+            val level = skillLevels[index]
+            if (level <= 0) {
+                null
+            } else {
+                val name = resources.getString(skill.titleRes)
+                if (skill.maxLevel > 1) {
+                    "$name Lv $level/${skill.maxLevel}"
+                } else {
+                    name
+                }
+            }
+        }
+    }
+
+    private fun formatUpgradeChoice(skill: PlayerSkill): String {
+        val name = resources.getString(skill.titleRes)
+        val current = skillLevels[skill.ordinal]
+        return if (skill.maxLevel > 1) {
+            val nextLevel = (current + 1).coerceAtMost(skill.maxLevel)
+            "$name (Lv $nextLevel/${skill.maxLevel})"
+        } else {
+            name
+        }
     }
 
     override fun run() {
@@ -245,11 +313,52 @@ class GameView @JvmOverloads constructor(
 
         updateCamera()
 
+        val regenLevel = skillLevels[PlayerSkill.REGENERATION.ordinal]
+        if (regenLevel > 0 && player.hp < player.maxHp) {
+            val regenRate = player.maxHp * 0.0018f * regenLevel
+            player.hp = (player.hp + regenRate * delta).coerceAtMost(player.maxHp)
+        }
+
+        val shockwaveLevel = skillLevels[PlayerSkill.SHOCKWAVE.ordinal]
+        if (shockwaveLevel > 0) {
+            shockwaveTimer -= delta
+            if (shockwaveTimer <= 0f) {
+                triggerShockwave(player, shockwaveLevel)
+                shockwaveTimer = shockwaveCooldown(shockwaveLevel)
+            }
+        }
+
+        val laserLevel = skillLevels[PlayerSkill.LASER_BARRAGE.ordinal]
+        if (laserLevel > 0) {
+            laserTimer -= delta
+            if (laserTimer <= 0f) {
+                fireLaserVolley(player, laserLevel)
+                laserTimer = laserCooldown(laserLevel)
+            }
+        }
+
+        val pulseLevel = skillLevels[PlayerSkill.BASE_PULSE.ordinal]
+        if (pulseLevel > 0) {
+            homePulseTimer -= delta
+            if (homePulseTimer <= 0f) {
+                triggerHomePulse(player, pulseLevel)
+                homePulseTimer = homePulseCooldown(pulseLevel)
+            }
+        }
+
+        val orbitalLevel = skillLevels[PlayerSkill.ORBITAL_BLADES.ordinal]
+        ensureOrbitalBlades(orbitalLevel)
+        if (orbitalLevel > 0) {
+            updateOrbitalBlades(player, delta, orbitalLevel)
+        } else {
+            orbitalBlades.clear()
+        }
+
         spawnTimer -= delta
         waveTimer += delta
         if (spawnTimer <= 0f) {
             spawnEnemies()
-            spawnTimer = max(0.5f - wave * 0.02f, 0.15f)
+            spawnTimer = (1.8f - wave * 0.08f).coerceAtLeast(0.45f)
         }
 
         if (waveTimer > 60f) {
@@ -292,27 +401,29 @@ class GameView @JvmOverloads constructor(
             projectile.x += projectile.vx * delta
             projectile.y += projectile.vy * delta
             projectile.lifetime -= delta
-            if (projectile.lifetime <= 0f) {
-                projectileIterator.remove()
-                continue
-            }
-            val enemyIterator = enemies.iterator()
-            while (enemyIterator.hasNext()) {
-                val enemy = enemyIterator.next()
-                if (hypot((projectile.x - enemy.x).toDouble(), (projectile.y - enemy.y).toDouble()) <= projectile.radius + enemy.radius) {
-                    enemy.hp -= projectile.damage
-                    projectile.lifetime = 0f
-                    callbacks?.onPlayHit()
-                    if (enemy.hp <= 0f) {
-                        dropPickup(enemy)
-                        enemyIterator.remove()
-                        player.gainXp(5 + wave) { level ->
-                            onLevelUp(level)
+            var removeProjectile = projectile.lifetime <= 0f
+            var projectileHit = false
+            if (!removeProjectile) {
+                val enemyIterator = enemies.iterator()
+                while (enemyIterator.hasNext()) {
+                    val enemy = enemyIterator.next()
+                    if (hypot((projectile.x - enemy.x).toDouble(), (projectile.y - enemy.y).toDouble()) <= projectile.radius + enemy.radius) {
+                        projectileHit = true
+                        applyDamageToEnemy(enemyIterator, enemy, projectile.damage, player)
+                        if (projectile.pierce <= 0) {
+                            removeProjectile = true
+                            break
+                        } else {
+                            projectile.pierce -= 1
                         }
                     }
-                    projectileIterator.remove()
-                    break
                 }
+            }
+            if (projectileHit) {
+                callbacks?.onPlayHit()
+            }
+            if (removeProjectile) {
+                projectileIterator.remove()
             }
         }
 
@@ -337,7 +448,17 @@ class GameView @JvmOverloads constructor(
             player.attackTimer = player.attackCooldown
         }
 
-        callbacks?.onHudChanged("HP ${player.hp.toInt()} / ${player.maxHp.toInt()} | LVL ${player.level} | Wave $wave")
+        val xpPercent = if (player.nextLevel > 0) {
+            (player.experience.toFloat() / player.nextLevel).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val xpPercentText = resources.getString(R.string.hud_xp_format, (xpPercent * 100f).toInt().coerceIn(0, 100))
+        callbacks?.onHudChanged(
+            "HP ${player.hp.toInt()} / ${player.maxHp.toInt()} | LVL ${player.level} | Wave $wave",
+            xpPercent,
+            xpPercentText
+        )
         saveTimer += delta
         if (saveTimer >= 2f) {
             saveTimer = 0f
@@ -367,17 +488,28 @@ class GameView @JvmOverloads constructor(
         if (target != null) {
             val angle = atan2(target.y - player.y, target.x - player.x)
             val speed = 500f
-            projectiles.add(
-                Projectile(
-                    x = player.x,
-                    y = player.y,
-                    vx = cos(angle) * speed,
-                    vy = sin(angle) * speed,
-                    radius = 16f,
-                    damage = player.damage,
-                    lifetime = 2f
+            val doubleShotLevel = skillLevels[PlayerSkill.DOUBLE_SHOT.ordinal]
+            val projectileCount = 1 + doubleShotLevel
+            val spread = if (projectileCount > 1) 0.12f + 0.02f * (projectileCount - 2) else 0f
+            val center = (projectileCount - 1) / 2f
+            val pierce = skillLevels[PlayerSkill.PIERCING_SHOT.ordinal]
+            repeat(projectileCount) { index ->
+                val offset = index - center
+                val finalAngle = angle + offset * spread
+                projectiles.add(
+                    Projectile(
+                        x = player.x,
+                        y = player.y,
+                        vx = cos(finalAngle) * speed,
+                        vy = sin(finalAngle) * speed,
+                        radius = 16f,
+                        damage = player.damage,
+                        lifetime = 2f,
+                        pierce = pierce,
+                        kind = Projectile.Kind.BULLET
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -407,24 +539,163 @@ class GameView @JvmOverloads constructor(
         pickup.y = (pickup.y + pickup.vy * delta).coerceIn(0f, worldHeight)
     }
 
+    private fun triggerShockwave(player: Player, level: Int) {
+        val radius = 220f + 40f * (level - 1)
+        val damage = player.damage * (0.22f + 0.09f * (level - 1))
+        var hit = false
+        val iterator = enemies.iterator()
+        while (iterator.hasNext()) {
+            val enemy = iterator.next()
+            val distance = hypot((enemy.x - player.x).toDouble(), (enemy.y - player.y).toDouble()).toFloat()
+            if (distance <= radius + enemy.radius) {
+                hit = true
+                applyDamageToEnemy(iterator, enemy, damage, player)
+            }
+        }
+        if (hit) {
+            callbacks?.onPlayHit()
+        }
+    }
+
+    private fun shockwaveCooldown(level: Int): Float {
+        return (5.2f - (level - 1) * 0.8f).coerceAtLeast(2f)
+    }
+
+    private fun fireLaserVolley(player: Player, level: Int) {
+        val count = 1 + (level - 1) / 2
+        val speed = 1200f
+        val damage = player.damage * (1.4f + 0.18f * (level - 1))
+        repeat(count) {
+            val target = enemies.randomOrNull()
+            val baseAngle = if (target != null) {
+                atan2(target.y - player.y, target.x - player.x)
+            } else {
+                Random.nextFloat() * (PI.toFloat() * 2f)
+            }
+            val variance = if (target != null) Random.nextFloat() * 0.3f - 0.15f else 0f
+            val angle = baseAngle + variance
+            projectiles.add(
+                Projectile(
+                    x = player.x,
+                    y = player.y,
+                    vx = cos(angle) * speed,
+                    vy = sin(angle) * speed,
+                    radius = 12f,
+                    damage = damage,
+                    lifetime = 0.45f,
+                    pierce = 1 + level / 2,
+                    kind = Projectile.Kind.LASER
+                )
+            )
+        }
+    }
+
+    private fun laserCooldown(level: Int): Float {
+        return (3.6f - (level - 1) * 0.45f).coerceAtLeast(1.2f)
+    }
+
+    private fun triggerHomePulse(player: Player, level: Int) {
+        val radius = 300f + 45f * (level - 1)
+        val damage = player.damage * (0.28f + 0.11f * (level - 1))
+        var hit = false
+        val iterator = enemies.iterator()
+        while (iterator.hasNext()) {
+            val enemy = iterator.next()
+            val distance = hypot((enemy.x - spawnX).toDouble(), (enemy.y - spawnY).toDouble()).toFloat()
+            if (distance <= radius + enemy.radius) {
+                hit = true
+                applyDamageToEnemy(iterator, enemy, damage, player)
+            }
+        }
+        if (hit) {
+            callbacks?.onPlayHit()
+        }
+    }
+
+    private fun homePulseCooldown(level: Int): Float {
+        return (7f - (level - 1) * 0.9f).coerceAtLeast(2.5f)
+    }
+
+    private fun ensureOrbitalBlades(level: Int) {
+        if (level <= 0) {
+            orbitalBlades.clear()
+            return
+        }
+        if (orbitalBlades.size != level) {
+            orbitalBlades.clear()
+            val twoPi = (PI * 2).toFloat()
+            repeat(level) { index ->
+                val angle = twoPi * (index.toFloat() / level.toFloat())
+                orbitalBlades.add(OrbitalBlade(angle))
+            }
+        }
+    }
+
+    private fun updateOrbitalBlades(player: Player, delta: Float, level: Int) {
+        if (level <= 0 || orbitalBlades.isEmpty()) {
+            return
+        }
+        val orbitDistance = player.radius + 110f + level * 12f
+        val bladeRadius = 18f
+        val rotationSpeed = 1.1f + 0.25f * level
+        val damage = player.damage * (0.32f + 0.12f * level)
+        val twoPi = (PI * 2).toFloat()
+        var hit = false
+        orbitalBlades.forEach { blade ->
+            blade.angle = (blade.angle + rotationSpeed * delta) % twoPi
+            val bladeX = player.x + cos(blade.angle) * orbitDistance
+            val bladeY = player.y + sin(blade.angle) * orbitDistance
+            val iterator = enemies.iterator()
+            while (iterator.hasNext()) {
+                val enemy = iterator.next()
+                if (hypot((bladeX - enemy.x).toDouble(), (bladeY - enemy.y).toDouble()) <= enemy.radius + bladeRadius) {
+                    hit = true
+                    applyDamageToEnemy(iterator, enemy, damage, player)
+                }
+            }
+        }
+        if (hit) {
+            callbacks?.onPlayHit()
+        }
+    }
+
+    private fun applyDamageToEnemy(iterator: MutableIterator<Enemy>, enemy: Enemy, damage: Float, player: Player) {
+        enemy.hp -= damage
+        if (enemy.hp <= 0f) {
+            dropPickup(enemy)
+            iterator.remove()
+            player.gainXp(5 + wave) { levelUp -> onLevelUp(levelUp) }
+        }
+    }
+
     private fun onLevelUp(level: Int) {
         if (awaitingUpgrade) return
         awaitingUpgrade = true
         pauseLoop()
-        val options = listOf(
-            resources.getString(R.string.upgrade_damage),
-            resources.getString(R.string.upgrade_attack_speed),
-            resources.getString(R.string.upgrade_move_speed),
-            resources.getString(R.string.upgrade_cooldown)
-        ).shuffled().take(3)
-        callbacks?.onUpgradeChoices(options) { choice ->
-            applyUpgrade(choice)
+        val available = PlayerSkill.values().filter { skill ->
+            skillLevels[skill.ordinal] < skill.maxLevel
+        }
+        if (available.isEmpty()) {
+            awaitingUpgrade = false
+            resumeLoop()
+            return
+        }
+        val choices = available
+            .shuffled()
+            .take(3)
+            .map { skill ->
+                UpgradeChoice(skill, formatUpgradeChoice(skill))
+            }
+        callbacks?.onUpgradeChoices(choices) { selected ->
+            applyUpgrade(selected)
         }
     }
 
     private fun spawnEnemies() {
         val player = player ?: return
-        val count = 1 + wave / 2
+        val baseCount = 1 + (wave - 1) / 3
+        val ramp = (waveTimer / 20f).toInt().coerceAtMost(3)
+        val count = (baseCount + ramp).coerceAtLeast(1).coerceAtMost(6 + wave / 2)
         repeat(count) {
             var attempts = 0
             var spawnX: Float
@@ -514,7 +785,21 @@ class GameView @JvmOverloads constructor(
                 canvas.drawCircle(enemy.x - cameraX, enemy.y - cameraY, enemy.radius, paint)
             }
             projectiles.forEach { projectile ->
-                canvas.drawCircle(projectile.x - cameraX, projectile.y - cameraY, projectile.radius, projectilePaint)
+                val paint = when (projectile.kind) {
+                    Projectile.Kind.BULLET -> projectilePaint
+                    Projectile.Kind.LASER -> laserPaint
+                }
+                canvas.drawCircle(projectile.x - cameraX, projectile.y - cameraY, projectile.radius, paint)
+            }
+            player?.let { player ->
+                if (skillLevels[PlayerSkill.ORBITAL_BLADES.ordinal] > 0 && orbitalBlades.isNotEmpty()) {
+                    val orbitDistance = player.radius + 110f + skillLevels[PlayerSkill.ORBITAL_BLADES.ordinal] * 12f
+                    orbitalBlades.forEach { blade ->
+                        val bladeX = player.x + cos(blade.angle) * orbitDistance
+                        val bladeY = player.y + sin(blade.angle) * orbitDistance
+                        canvas.drawCircle(bladeX - cameraX, bladeY - cameraY, 18f, orbitalPaint)
+                    }
+                }
             }
             pickups.forEach { pickup ->
                 canvas.drawCircle(pickup.x - cameraX, pickup.y - cameraY, pickup.radius, xpPaint)
@@ -555,11 +840,22 @@ class GameView @JvmOverloads constructor(
     private fun resetState(snapshot: PlayerSnapshot) {
         wave = snapshot.wave
         lastSnapshot = snapshot
+        val snapshotSkills = snapshot.skillLevels
+        PlayerSkill.values().forEachIndexed { index, _ ->
+            skillLevels[index] = snapshotSkills.getOrNull(index) ?: 0
+        }
         spawnTimer = 0f
         waveTimer = 0f
         bossSpawned = false
         saveTimer = 0f
         awaitingUpgrade = false
+        val shockwaveLevel = skillLevels[PlayerSkill.SHOCKWAVE.ordinal]
+        shockwaveTimer = if (shockwaveLevel > 0) shockwaveCooldown(shockwaveLevel) else 0f
+        val laserLevel = skillLevels[PlayerSkill.LASER_BARRAGE.ordinal]
+        laserTimer = if (laserLevel > 0) laserCooldown(laserLevel) else 0f
+        val pulseLevel = skillLevels[PlayerSkill.BASE_PULSE.ordinal]
+        homePulseTimer = if (pulseLevel > 0) homePulseCooldown(pulseLevel) else 0f
+        ensureOrbitalBlades(skillLevels[PlayerSkill.ORBITAL_BLADES.ordinal])
         enemies.clear()
         projectiles.clear()
         pickups.clear()

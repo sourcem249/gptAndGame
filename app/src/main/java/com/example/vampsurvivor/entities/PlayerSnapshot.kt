@@ -14,7 +14,7 @@ data class PlayerSnapshot(
     val damage: Float = archetype.damage,
     val attackCooldown: Float = archetype.attackCooldown,
     val moveSpeed: Float = archetype.moveSpeed,
-    val skillChoices: List<String> = emptyList(),
+    val skillLevels: List<Int> = emptyList(),
     val wave: Int = 1,
     val isRunning: Boolean = false
 ) : Parcelable {

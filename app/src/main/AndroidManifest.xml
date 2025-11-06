@@ -13,7 +13,9 @@
         <activity android:name="com.example.vampsurvivor.CharacterSelectActivity" />
         <activity android:name="com.example.vampsurvivor.GameActivity"
             android:configChanges="keyboardHidden|orientation|screenSize" />
-        <activity android:name="com.example.vampsurvivor.MainActivity">
+        <activity
+            android:name="com.example.vampsurvivor.MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
