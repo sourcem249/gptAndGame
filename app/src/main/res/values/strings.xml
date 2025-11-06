@@ -17,5 +17,9 @@
     <string name="upgrade_damage">Increase damage</string>
     <string name="upgrade_attack_speed">Increase attack speed</string>
     <string name="upgrade_move_speed">Increase move speed</string>
-    <string name="upgrade_cooldown">Reduce cooldowns</string>
+    <string name="upgrade_double_shot">Double shot</string>
+    <string name="upgrade_shockwave">Shockwave pulse</string>
+    <string name="upgrade_regeneration">Regeneration</string>
+    <string name="pause_skill_header">Equipped skills</string>
+    <string name="pause_skill_empty">No upgrades acquired yet.</string>
 </resources>

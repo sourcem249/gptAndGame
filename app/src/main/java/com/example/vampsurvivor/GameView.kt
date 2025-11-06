@@ -13,7 +13,9 @@ import com.example.vampsurvivor.entities.Enemy
 import com.example.vampsurvivor.entities.Obstacle
 import com.example.vampsurvivor.entities.PickupItem
 import com.example.vampsurvivor.entities.Player
+import com.example.vampsurvivor.entities.PlayerSkill
 import com.example.vampsurvivor.entities.PlayerSnapshot
+import com.example.vampsurvivor.entities.UpgradeChoice
 import com.example.vampsurvivor.entities.Projectile
 import com.example.vampsurvivor.systems.GameLoopController
 import com.example.vampsurvivor.systems.VirtualJoystick
@@ -21,7 +23,6 @@ import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
-import kotlin.math.max
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -90,6 +91,8 @@ class GameView @JvmOverloads constructor(
 
     private var awaitingUpgrade = false
     private var lastSnapshot = PlayerSnapshot.default()
+    private val skillLevels = IntArray(PlayerSkill.values().size)
+    private var shockwaveTimer = 0f
 
     init {
         holder.addCallback(this)
@@ -177,33 +180,72 @@ class GameView @JvmOverloads constructor(
             damage = player.damage,
             attackCooldown = player.attackCooldown,
             moveSpeed = player.moveSpeed,
+            skillLevels = skillLevels.toList(),
             wave = wave,
             isRunning = running && !paused
         )
         return lastSnapshot
     }
 
-    fun applyUpgrade(choice: String) {
+    fun applyUpgrade(skill: PlayerSkill) {
         val player = player ?: return
-        when {
-            choice.contains("damage", ignoreCase = true) -> {
+        val index = skill.ordinal
+        if (skillLevels[index] >= skill.maxLevel) {
+            awaitingUpgrade = false
+            resumeLoop()
+            return
+        }
+        skillLevels[index] += 1
+        when (skill) {
+            PlayerSkill.DAMAGE -> {
                 player.damage *= 1.25f
             }
-            choice.contains("attack", ignoreCase = true) -> {
+            PlayerSkill.ATTACK_SPEED -> {
                 player.attackCooldown *= 0.85f
+                player.attackTimer = player.attackTimer.coerceAtMost(player.attackCooldown)
             }
-            choice.contains("move", ignoreCase = true) -> {
+            PlayerSkill.MOVE_SPEED -> {
                 player.moveSpeed *= 1.2f
             }
-            choice.contains("cooldown", ignoreCase = true) -> {
-                player.attackCooldown *= 0.8f
+            PlayerSkill.DOUBLE_SHOT -> {
+                // handled during auto-attack
             }
-            choice.contains("heal", ignoreCase = true) -> {
-                player.heal(0.2f)
+            PlayerSkill.SHOCKWAVE -> {
+                shockwaveTimer = 0f
+            }
+            PlayerSkill.REGENERATION -> {
+                // handled in update loop
             }
         }
         awaitingUpgrade = false
         resumeLoop()
+    }
+
+    fun skillSummaries(): List<String> {
+        return PlayerSkill.values().mapIndexedNotNull { index, skill ->
+            val level = skillLevels[index]
+            if (level <= 0) {
+                null
+            } else {
+                val name = resources.getString(skill.titleRes)
+                if (skill.maxLevel > 1) {
+                    "$name Lv $level/${skill.maxLevel}"
+                } else {
+                    name
+                }
+            }
+        }
+    }
+
+    private fun formatUpgradeChoice(skill: PlayerSkill): String {
+        val name = resources.getString(skill.titleRes)
+        val current = skillLevels[skill.ordinal]
+        return if (skill.maxLevel > 1) {
+            val nextLevel = (current + 1).coerceAtMost(skill.maxLevel)
+            "$name (Lv $nextLevel/${skill.maxLevel})"
+        } else {
+            name
+        }
     }
 
     override fun run() {
@@ -245,11 +287,26 @@ class GameView @JvmOverloads constructor(
 
         updateCamera()
 
+        val regenLevel = skillLevels[PlayerSkill.REGENERATION.ordinal]
+        if (regenLevel > 0 && player.hp < player.maxHp) {
+            val regenRate = player.maxHp * 0.0025f * regenLevel
+            player.hp = (player.hp + regenRate * delta).coerceAtMost(player.maxHp)
+        }
+
+        val shockwaveLevel = skillLevels[PlayerSkill.SHOCKWAVE.ordinal]
+        if (shockwaveLevel > 0) {
+            shockwaveTimer -= delta
+            if (shockwaveTimer <= 0f) {
+                triggerShockwave(player, shockwaveLevel)
+                shockwaveTimer = shockwaveCooldown(shockwaveLevel)
+            }
+        }
+
         spawnTimer -= delta
         waveTimer += delta
         if (spawnTimer <= 0f) {
             spawnEnemies()
-            spawnTimer = max(0.5f - wave * 0.02f, 0.15f)
+            spawnTimer = (1.8f - wave * 0.08f).coerceAtLeast(0.45f)
         }
 
         if (waveTimer > 60f) {
@@ -367,17 +424,24 @@ class GameView @JvmOverloads constructor(
         if (target != null) {
             val angle = atan2(target.y - player.y, target.x - player.x)
             val speed = 500f
-            projectiles.add(
-                Projectile(
-                    x = player.x,
-                    y = player.y,
-                    vx = cos(angle) * speed,
-                    vy = sin(angle) * speed,
-                    radius = 16f,
-                    damage = player.damage,
-                    lifetime = 2f
+            val projectileCount = if (skillLevels[PlayerSkill.DOUBLE_SHOT.ordinal] > 0) 2 else 1
+            val spread = if (projectileCount > 1) 0.12f else 0f
+            val center = (projectileCount - 1) / 2f
+            repeat(projectileCount) { index ->
+                val offset = index - center
+                val finalAngle = angle + offset * spread
+                projectiles.add(
+                    Projectile(
+                        x = player.x,
+                        y = player.y,
+                        vx = cos(finalAngle) * speed,
+                        vy = sin(finalAngle) * speed,
+                        radius = 16f,
+                        damage = player.damage,
+                        lifetime = 2f
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -407,24 +471,61 @@ class GameView @JvmOverloads constructor(
         pickup.y = (pickup.y + pickup.vy * delta).coerceIn(0f, worldHeight)
     }
 
+    private fun triggerShockwave(player: Player, level: Int) {
+        val radius = 220f + 30f * (level - 1)
+        val damage = player.damage * (0.25f + 0.1f * (level - 1))
+        var hit = false
+        val iterator = enemies.iterator()
+        while (iterator.hasNext()) {
+            val enemy = iterator.next()
+            val distance = hypot((enemy.x - player.x).toDouble(), (enemy.y - player.y).toDouble()).toFloat()
+            if (distance <= radius + enemy.radius) {
+                enemy.hp -= damage
+                hit = true
+                if (enemy.hp <= 0f) {
+                    dropPickup(enemy)
+                    iterator.remove()
+                    player.gainXp(5 + wave) { levelUp -> onLevelUp(levelUp) }
+                }
+            }
+        }
+        if (hit) {
+            callbacks?.onPlayHit()
+        }
+    }
+
+    private fun shockwaveCooldown(level: Int): Float {
+        return (6f - (level - 1) * 1.2f).coerceAtLeast(2.5f)
+    }
+
     private fun onLevelUp(level: Int) {
         if (awaitingUpgrade) return
         awaitingUpgrade = true
         pauseLoop()
-        val options = listOf(
-            resources.getString(R.string.upgrade_damage),
-            resources.getString(R.string.upgrade_attack_speed),
-            resources.getString(R.string.upgrade_move_speed),
-            resources.getString(R.string.upgrade_cooldown)
-        ).shuffled().take(3)
-        callbacks?.onUpgradeChoices(options) { choice ->
-            applyUpgrade(choice)
+        val available = PlayerSkill.values().filter { skill ->
+            skillLevels[skill.ordinal] < skill.maxLevel
+        }
+        if (available.isEmpty()) {
+            awaitingUpgrade = false
+            resumeLoop()
+            return
+        }
+        val choices = available
+            .shuffled()
+            .take(3)
+            .map { skill ->
+                UpgradeChoice(skill, formatUpgradeChoice(skill))
+            }
+        callbacks?.onUpgradeChoices(choices) { selected ->
+            applyUpgrade(selected)
         }
     }
 
     private fun spawnEnemies() {
         val player = player ?: return
-        val count = 1 + wave / 2
+        val baseCount = 1 + (wave - 1) / 3
+        val ramp = (waveTimer / 20f).toInt().coerceAtMost(3)
+        val count = (baseCount + ramp).coerceAtLeast(1).coerceAtMost(6 + wave / 2)
         repeat(count) {
             var attempts = 0
             var spawnX: Float
@@ -555,11 +656,17 @@ class GameView @JvmOverloads constructor(
     private fun resetState(snapshot: PlayerSnapshot) {
         wave = snapshot.wave
         lastSnapshot = snapshot
+        val snapshotSkills = snapshot.skillLevels
+        PlayerSkill.values().forEachIndexed { index, _ ->
+            skillLevels[index] = snapshotSkills.getOrNull(index) ?: 0
+        }
         spawnTimer = 0f
         waveTimer = 0f
         bossSpawned = false
         saveTimer = 0f
         awaitingUpgrade = false
+        val shockwaveLevel = skillLevels[PlayerSkill.SHOCKWAVE.ordinal]
+        shockwaveTimer = if (shockwaveLevel > 0) shockwaveCooldown(shockwaveLevel) else 0f
         enemies.clear()
         projectiles.clear()
         pickups.clear()
