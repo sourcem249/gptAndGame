@@ -24,12 +24,18 @@ class GameStateStore(context: Context) {
             putFloat(KEY_MOVE_SPEED, snapshot.moveSpeed)
             putInt(KEY_WAVE, snapshot.wave)
             putBoolean(KEY_RUNNING, snapshot.isRunning)
+            putString(KEY_SKILLS, snapshot.skillLevels.joinToString(separator = ","))
         }
     }
 
     suspend fun loadSnapshot(): PlayerSnapshot? = withContext(Dispatchers.IO) {
         val archetypeName = prefs.getString(KEY_ARCHETYPE, null) ?: return@withContext null
         val archetype = runCatching { PlayerArchetype.valueOf(archetypeName) }.getOrElse { PlayerArchetype.SPEEDSTER }
+        val skillLevels = prefs.getString(KEY_SKILLS, null)
+            ?.split(',')
+            ?.mapNotNull { it.toIntOrNull() }
+            ?.toList()
+            ?: emptyList()
         PlayerSnapshot(
             archetype = archetype,
             level = prefs.getInt(KEY_LEVEL, 1),
@@ -40,6 +46,7 @@ class GameStateStore(context: Context) {
             damage = prefs.getFloat(KEY_DAMAGE, archetype.damage),
             attackCooldown = prefs.getFloat(KEY_COOLDOWN, archetype.attackCooldown),
             moveSpeed = prefs.getFloat(KEY_MOVE_SPEED, archetype.moveSpeed),
+            skillLevels = skillLevels,
             wave = prefs.getInt(KEY_WAVE, 1),
             isRunning = prefs.getBoolean(KEY_RUNNING, false)
         )
@@ -57,5 +64,6 @@ class GameStateStore(context: Context) {
         private const val KEY_MOVE_SPEED = "moveSpeed"
         private const val KEY_WAVE = "wave"
         private const val KEY_RUNNING = "running"
+        private const val KEY_SKILLS = "skills"
     }
 }

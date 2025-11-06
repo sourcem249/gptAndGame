@@ -7,5 +7,12 @@ data class Projectile(
     var vy: Float,
     var radius: Float,
     var damage: Float,
-    var lifetime: Float
-)
+    var lifetime: Float,
+    var pierce: Int = 0,
+    val kind: Kind = Kind.BULLET
+) {
+    enum class Kind {
+        BULLET,
+        LASER
+    }
+}
