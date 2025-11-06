@@ -5,9 +5,7 @@ data class PickupItem(
     var y: Float,
     var radius: Float,
     val xp: Int,
-    val type: Type,
-    var vx: Float = 0f,
-    var vy: Float = 0f
+    val type: Type
 ) {
     enum class Type { XP_GEM, HEALING }
 }
